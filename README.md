@@ -1,17 +1,18 @@
-# Knapsack Problem with Forfeit Sets — Instance Generator & Solver
+# Knapsack Problem with Forfeit Sets — Instance Generator & Solvers
 
 ## Problem description
 
-The **Knapsack Problem with Forfeit Sets (KPFS)** extends the classical 0/1 knapsack problem. Items are partitioned into disjoint *forfeit sets*. Each set has an *allowance* `h_i`: if more than `h_i` items from set `i` are selected, a *forfeit cost* `d_i` is incurred per violation. The objective is to maximise total profit minus total forfeit costs, subject to the knapsack weight capacity and a global limit on total violations.
+The **Knapsack Problem with Forfeit Sets (KPFS)** extends the classical 0/1 knapsack problem. Items are partitioned into disjoint *forfeit sets*. Each set has an *allowance* `h_i`: if more than `h_i` items from set `i` are selected, a *forfeit cost* `d_i` is incurred per violation. The objective is to maximise total profit minus total forfeit costs, subject to the knapsack weight capacity and a global limit on total violations `k = round(n / 15)`.
 
 ## Requirements
 
 - Python 3.8+
 - NumPy
-- Gurobi (with valid licence)
+- pandas
+- Gurobi (with valid licence) — only required for the MIP solver
 
 ```
-pip install numpy gurobipy
+pip install numpy pandas gurobipy
 ```
 
 ## Scripts
@@ -19,8 +20,11 @@ pip install numpy gurobipy
 | Script | Purpose |
 |---|---|
 | `generate_instances.py` | Generate all benchmark instances |
-| `solve_kpfs_instance_gurobi.py` | Solve a single instance with Gurobi |
-| `solve_all_instances.py` | Solve all instances and write results to CSV |
+| `solve_kpfs_instance_gurobi.py` | Solve a single instance with Gurobi (MIP) |
+| `solve_kpdfs_dp.py` | Solve a single instance with dynamic programming |
+| `solve_all_instances_gurobi.py` | Solve all instances with Gurobi, write `results_gurobi.csv` |
+| `solve_all_instances_dp.py` | Solve all instances with DP, write `results_dp.csv` |
+| `compare_results.py` | Compare both result CSVs, print summary tables |
 
 ---
 
@@ -69,15 +73,15 @@ h_1 d_1 |C_1|
 ...
 ```
 
-| Symbol  | Meaning                        |
-|---------|--------------------------------|
-| `nI`    | Number of items                |
-| `nS`    | Number of forfeit sets         |
-| `kS`    | Knapsack capacity              |
-| `p_j`   | Profit of item `j`             |
-| `w_j`   | Weight of item `j`             |
-| `h_i`   | Allowance of forfeit set `i`   |
-| `d_i`   | Forfeit cost of set `i`        |
+| Symbol    | Meaning                        |
+|-----------|--------------------------------|
+| `nI`      | Number of items                |
+| `nS`      | Number of forfeit sets         |
+| `kS`      | Knapsack capacity              |
+| `p_j`     | Profit of item `j`             |
+| `w_j`     | Weight of item `j`             |
+| `h_i`     | Allowance of forfeit set `i`   |
+| `d_i`     | Forfeit cost of set `i`        |
 | `\|C_i\|` | Cardinality of forfeit set `i` |
 
 ### Generation parameters
@@ -109,19 +113,16 @@ Each instance is generated from a deterministic seed derived from `(n, corr_type
 
 ---
 
-## Solving a single instance
+## Gurobi MIP solver
+
+### Solving a single instance
 
 ```bash
-python solve_kpfs_instance_gurobi.py instances/not-correlated/id_1_objs_300_size_465_sets_76_maxNumConflicts_6_maxCost_20_not-correlated.txt
-```
-
-Add `--verbose` to enable Gurobi's solver output:
-
-```bash
+python solve_kpfs_instance_gurobi.py instances/not-correlated/id_1_objs_300_...txt
 python solve_kpfs_instance_gurobi.py path/to/instance.txt --verbose
 ```
 
-A live elapsed-time counter is shown during solving. After completion the script prints:
+A live elapsed-time counter is shown during solving. Output after completion:
 
 ```
 Status:           optimal
@@ -134,18 +135,37 @@ Total violations: 2.0000
 
 ### Gurobi settings
 
-| Parameter   | Value  |
-|-------------|--------|
-| Time limit  | 3 hours (10800s) |
-| MIP gap     | 1e-4   |
+| Parameter  | Value            |
+|------------|------------------|
+| Time limit | 3 hours (10800s) |
+| MIP gap    | 1e-4             |
 
 ### Model formulation
 
 - Binary variables `x_j ∈ {0,1}` — 1 if item `j` is selected
 - Continuous variables `v_i ≥ 0` — violations for forfeit set `i`
 - Objective: maximise `Σ p_j x_j − Σ d_i v_i`
-- Constraints: weight budget, global violation bound `k = round(n/15)`, per-set violation definition
+- Constraints: weight budget, global violation bound `k`, per-set violation definition
 - Upper bounds on `v_i` tightened via Proposition 2.2
+
+### Solving all instances
+
+```bash
+python solve_all_instances_gurobi.py
+```
+
+Writes results to `results_gurobi.csv`.
+
+| Column             | Content                                        |
+|--------------------|------------------------------------------------|
+| `corr_type`        | not-correlated / correlated / fully-correlated |
+| `instance_file`    | Filename                                       |
+| `status`           | optimal / time_limit / infeasible              |
+| `obj_value`        | Objective value                                |
+| `mip_gap`          | Relative MIP gap                               |
+| `runtime`          | Wall-clock seconds                             |
+| `n_items_selected` | Number of selected items                       |
+| `total_violations` | Sum of `v_i` across all forfeit sets           |
 
 ### Importing as a module
 
@@ -154,32 +174,61 @@ from solve_kpfs_instance_gurobi import solve_kpfs
 
 result = solve_kpfs("path/to/instance.txt")
 print(result["obj_value"])
-print(result["selected_items"])
 ```
 
 Returned dict keys: `status`, `obj_value`, `mip_gap`, `runtime`, `selected_items`, `violations_per_set`, `total_violations`.
 
 ---
 
-## Solving all instances
+## Dynamic programming solver
+
+### Solving a single instance
 
 ```bash
-python solve_all_instances.py
+python solve_kpdfs_dp.py instances/not-correlated/id_1_objs_300_...txt
 ```
 
-Iterates over all instance files in `instances/`, solves each with Gurobi, prints a one-line summary per instance, and writes all results to `results.csv`.
+Prints progress per forfeit set and a final objective value.
 
-### results.csv columns
+### Algorithm overview
 
-| Column            | Content                                      |
-|-------------------|----------------------------------------------|
-| `corr_type`       | not-correlated / correlated / fully-correlated |
-| `instance_file`   | Filename                                     |
-| `status`          | optimal / time_limit / infeasible            |
-| `obj_value`       | Objective value                              |
-| `mip_gap`         | Relative MIP gap                             |
-| `runtime`         | Wall-clock seconds                           |
-| `n_items_selected`| Number of selected items                     |
-| `total_violations`| Sum of `v_i` across all forfeit sets         |
+The DP processes forfeit sets one by one, maintaining a table `f[b', k']` = best profit using exactly `b'` total weight and at most `k'` violations from the sets processed so far.
 
-The CSV is flushed after every row, so partial results are preserved if the run is interrupted.
+For each forfeit set `C_i`:
+1. Compute `A_i[W, s]` = max profit from exactly `s` items in `C_i` with total weight exactly `W` (small 0/1 knapsack DP)
+2. Compute `val_i[W, s] = A_i[W, s] − d_i · max(0, s − h_i)`
+3. Update `f_curr[b', k']` via the Bellman equation over all valid `(W, s)` pairs using numpy slice operations
+
+Final answer: `max over b' = 0..b of f[b', k]`.
+
+Items not belonging to any forfeit set are collected into a penalty-free extra set.
+
+### Solving all instances
+
+```bash
+python solve_all_instances_dp.py
+```
+
+Writes results to `results_dp.csv`.
+
+| Column          | Content          |
+|-----------------|------------------|
+| `corr_type`     | Correlation type |
+| `instance_file` | Filename         |
+| `obj_value`     | Objective value  |
+| `runtime`       | Wall-clock seconds |
+
+---
+
+## Comparing both solvers
+
+```bash
+python compare_results.py                            # compare existing CSVs
+python compare_results.py --rerun-gurobi             # rerun Gurobi, then compare
+python compare_results.py --rerun-dp                 # rerun DP, then compare
+python compare_results.py --rerun-gurobi --rerun-dp  # rerun both, then compare
+```
+
+Prints summary tables broken down by correlation type, item count `n`, and their combination. Also lists the 10 instances with the largest objective discrepancy between the two methods.
+
+The **obj gap%** is `(gurobi − dp) / |gurobi| × 100`. A positive value means Gurobi found a better solution; a negative value indicates a bug.
