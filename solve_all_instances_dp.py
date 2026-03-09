@@ -8,20 +8,21 @@ from solve_kpdfs_instance_dp import solve_kpdfs
 INSTANCE_DIR = "instances"
 RESULTS_FILE = "results_dp.csv"
 
-FIELDNAMES = [
-    "corr_type", "instance_file",
-    "obj_value", "runtime",
-]
+FIELDNAMES = ["scenario", "corr_type", "instance_file", "n", "obj_value", "runtime"]
 
 
 def iter_instances():
-    """Yield (corr_type, filepath) for every instance file, sorted."""
-    for corr_type in sorted(os.listdir(INSTANCE_DIR)):
-        subdir = os.path.join(INSTANCE_DIR, corr_type)
-        if not os.path.isdir(subdir):
+    """Yield (scenario, corr_type, filepath) for every instance file, sorted."""
+    for scenario in sorted(os.listdir(INSTANCE_DIR)):
+        scenario_dir = os.path.join(INSTANCE_DIR, scenario)
+        if not os.path.isdir(scenario_dir):
             continue
-        for path in sorted(glob.glob(os.path.join(subdir, "*.txt"))):
-            yield corr_type, path
+        for corr_type in sorted(os.listdir(scenario_dir)):
+            subdir = os.path.join(scenario_dir, corr_type)
+            if not os.path.isdir(subdir):
+                continue
+            for path in sorted(glob.glob(os.path.join(subdir, "*.txt"))):
+                yield scenario, corr_type, path
 
 
 def main():
@@ -36,15 +37,18 @@ def main():
         writer = csv.DictWriter(csvfile, fieldnames=FIELDNAMES)
         writer.writeheader()
 
-        for i, (corr_type, path) in enumerate(instance_list, 1):
+        for i, (scenario, corr_type, path) in enumerate(instance_list, 1):
             filename = os.path.basename(path)
-            print(f"[{i}/{total}] {corr_type}/{filename}")
+            n = int(filename.split("objs_")[1].split("_")[0])
+            print(f"[{i}/{total}] {scenario}/{corr_type}/{filename}")
 
             result = solve_kpdfs(path)
 
             row = {
+                "scenario":      scenario,
                 "corr_type":     corr_type,
                 "instance_file": filename,
+                "n":             n,
                 "obj_value":     result["obj_value"],
                 "runtime":       f"{result['runtime']:.2f}",
             }

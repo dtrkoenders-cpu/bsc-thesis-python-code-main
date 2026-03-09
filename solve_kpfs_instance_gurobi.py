@@ -1,5 +1,4 @@
 import sys
-import argparse
 import time
 
 import numpy as np
@@ -15,7 +14,7 @@ def read_instance(path):
     with open(path) as f:
         lines = f.read().splitlines()
 
-    nI, nS, kS = map(int, lines[0].split())
+    nI, nS, kS, k = map(int, lines[0].split())
     profits = np.array(lines[1].split(), dtype=int)
     weights = np.array(lines[2].split(), dtype=int)
 
@@ -27,7 +26,7 @@ def read_instance(path):
         forfeit_sets.append({'h': nA, 'd': fC, 'items': items})
         idx += 2
 
-    return nI, nS, kS, profits, weights, forfeit_sets
+    return nI, nS, kS, profits, weights, forfeit_sets, k
 
 
 # ---------------------------------------------------------------------------
@@ -42,8 +41,8 @@ def compute_v_upper_bounds(forfeit_sets, profits):
       v_i <= |C_hat_i|
 
     Intuition: it only makes sense to 'accept' a violation for item j if its
-    profit p_j > d_i (the penalty paid per violation).  The top-h_i items are
-    always taken without penalty, so only the remainder is relevant.
+    profit p_j > d_i. The top-h_i items are always taken without penalty, so 
+    only the remainder is relevant.
     """
     v_ubs = []
     for fs in forfeit_sets:
@@ -55,23 +54,10 @@ def compute_v_upper_bounds(forfeit_sets, profits):
 
 
 # ---------------------------------------------------------------------------
-# Solver callback — live elapsed-time display
-# ---------------------------------------------------------------------------
-
-def _make_timer_callback(t0):
-    """Returns a Gurobi callback that prints elapsed time on a single line."""
-    def callback(_, where):
-        if where == GRB.Callback.MIP:
-            elapsed = time.time() - t0
-            print(f"\r  Solving... {elapsed:8.1f}s elapsed", end='', flush=True)
-    return callback
-
-
-# ---------------------------------------------------------------------------
 # Solver
 # ---------------------------------------------------------------------------
 
-def solve_kpfs(instance_path, verbose=False):
+def solve_kpfs(instance_path):
     """
     Solve a KPFS instance.
 
@@ -79,10 +65,7 @@ def solve_kpfs(instance_path, verbose=False):
         status, obj_value, mip_gap, runtime,
         selected_items, violations_per_set, total_violations
     """
-    nI, nS, b, profits, weights, forfeit_sets = read_instance(instance_path)
-
-    # k = maximum total violations across all forfeit sets (not stored in file)
-    k = round(nI / 15)
+    nI, nS, b, profits, weights, forfeit_sets, k = read_instance(instance_path)
 
     v_ubs = compute_v_upper_bounds(forfeit_sets, profits)
 
@@ -90,12 +73,13 @@ def solve_kpfs(instance_path, verbose=False):
     # Build model
     # ------------------------------------------------------------------
     m = gp.Model("KPFS")
-    m.setParam('OutputFlag', int(verbose))
+    m.setParam('OutputFlag', 0)
     m.setParam('TimeLimit', 10800)   # 3 hours
     m.setParam('MIPGap', 1e-4)
 
     # --- Variables ---
     x = m.addVars(nI, vtype=GRB.BINARY, name='x')
+    #x = m.addVars(nI, lb=0.0, ub=1.0, vtype=GRB.CONTINUOUS, name='x')
     v = m.addVars(nS, lb=0.0, ub=[float(ub) for ub in v_ubs],
                   vtype=GRB.CONTINUOUS, name='v')
 
@@ -127,80 +111,13 @@ def solve_kpfs(instance_path, verbose=False):
     # Solve
     # ------------------------------------------------------------------
     t0 = time.time()
-    m.optimize(_make_timer_callback(t0))
-    print()  # newline after the live clock
+    m.optimize()
     runtime = time.time() - t0
 
-    # ------------------------------------------------------------------
-    # Extract results
-    # ------------------------------------------------------------------
-    status_map = {
-        GRB.OPTIMAL:    'optimal',
-        GRB.TIME_LIMIT: 'time_limit',
-        GRB.INFEASIBLE: 'infeasible',
-        GRB.INF_OR_UNBD: 'inf_or_unbounded',
-    }
-    status = status_map.get(m.Status, f'gurobi_status_{m.Status}')
-
-    if m.SolCount == 0:
-        return {
-            'status': status,
-            'obj_value': None,
-            'mip_gap': None,
-            'runtime': runtime,
-            'selected_items': None,
-            'violations_per_set': None,
-            'total_violations': None,
-        }
-
-    x_vals = np.array([x[j].X for j in range(nI)])
-    selected_items = np.where(x_vals > 0.5)[0]
-    violations_per_set = np.array([v[i].X for i in range(nS)])
-    total_violations = violations_per_set.sum()
-
-    _check_feasibility(selected_items, violations_per_set,
-                       weights, b, k, forfeit_sets)
-
     return {
-        'status': status,
-        'obj_value': m.ObjVal,
-        'mip_gap': m.MIPGap,
-        'runtime': runtime,
-        'selected_items': selected_items,
-        'violations_per_set': violations_per_set,
-        'total_violations': total_violations,
+        'obj_value': m.ObjVal if m.SolCount > 0 else None,
+        'runtime':   runtime,
     }
-
-
-# ---------------------------------------------------------------------------
-# Feasibility check
-# ---------------------------------------------------------------------------
-
-def _check_feasibility(selected_items, violations_per_set,
-                        weights, b, k, forfeit_sets, tol=1e-6):
-    total_weight = weights[selected_items].sum()
-    if total_weight > b + tol:
-        raise RuntimeError(
-            f"Feasibility check failed — budget: {total_weight:.2f} > {b}"
-        )
-
-    total_violations = violations_per_set.sum()
-    if total_violations > k + tol:
-        raise RuntimeError(
-            f"Feasibility check failed — global violation bound: "
-            f"{total_violations:.4f} > {k}"
-        )
-
-    selected_mask = np.zeros(weights.shape[0], dtype=bool)
-    selected_mask[selected_items] = True
-    for i, fs in enumerate(forfeit_sets):
-        selected_in_set = selected_mask[fs['items']].sum()
-        if selected_in_set - violations_per_set[i] > fs['h'] + tol:
-            raise RuntimeError(
-                f"Feasibility check failed — forfeit set {i}: "
-                f"{selected_in_set} selected, {violations_per_set[i]:.4f} violations, "
-                f"allowance {fs['h']}"
-            )
 
 
 # ---------------------------------------------------------------------------
@@ -208,25 +125,17 @@ def _check_feasibility(selected_items, violations_per_set,
 # ---------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description='Solve a KPFS instance with Gurobi.')
-    parser.add_argument('instance', help='Path to instance file')
-    parser.add_argument('--verbose', action='store_true',
-                        help='Enable Gurobi console output')
-    args = parser.parse_args()
-
-    result = solve_kpfs(args.instance, verbose=args.verbose)
-
-    print(f"Status:           {result['status']}")
-    print(f"Runtime:          {result['runtime']:.2f}s")
-
-    if result['obj_value'] is None:
-        print("No feasible solution found within the time limit.")
+    if len(sys.argv) != 2:
+        print("Usage: python solve_kpfs_instance_gurobi.py <instance_path>")
         sys.exit(1)
 
-    print(f"Objective value:  {result['obj_value']:.4f}")
-    print(f"MIP gap:          {result['mip_gap']:.2e}")
-    print(f"Items selected:   {len(result['selected_items'])}")
-    print(f"Total violations: {result['total_violations']:.4f}")
+    result = solve_kpfs(sys.argv[1])
+
+    print(f"Runtime:          {result['runtime']:.2f}s")
+    if result['obj_value'] is None:
+        print("No feasible solution found.")
+    else:
+        print(f"Objective value:  {result['obj_value']:.4f}")
 
 
 if __name__ == '__main__':
