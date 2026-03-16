@@ -20,6 +20,9 @@ generators/
 transforms/
   make_disjoint.py                # transform overlapping → disjoint instances
 
+test/
+  test_compare_overlap.py         # quick comparison: DP heuristic vs Gurobi on a subset
+
 Solvers/
   solve_kpdfs_instance_dp.py      # DP solver for a single disjoint instance
   solve_kpfs_instance_gurobi.py   # Gurobi MIP solver for a single instance
@@ -155,9 +158,19 @@ python transforms/make_disjoint.py
 Transforms every overlapping instance into an equivalent disjoint one and writes results to `instances/overlap_disjoint/` (mirroring the `overlap/` structure).
 
 For each pair of sets `(C_a, C_b)` sharing items `S_ab`:
-- A new set `C_ab` is created with `items = S_ab`, `d = d_a + d_b`, `h = min(h_a, h_b)`.
-- `C_a` and `C_b` keep only their non-shared items; allowances are scaled proportionally.
+- A new merged set `C_ab` is created with `items = S_ab`, `d = d_a + d_b`, and `h` determined by scenario (see table below).
+- `C_a` and `C_b` keep only their non-shared items; allowances are scaled proportionally: `h' = floor(h * |remaining| / |original|)`.
 - Empty sets after removal are dropped.
+- The global violation budget `k` is scaled by `K_SCALE` after transformation.
+
+Both `K_SCALE` and `MERGED_H` are configurable constants at the top of `make_disjoint.py`.
+
+| Scenario | Merged set allowance `h`  | `K_SCALE` |
+|----------|---------------------------|-----------|
+| 1        | `\|S_ab\| − 1`            | 1         |
+| 2        | `\|S_ab\| − 1`            | 1         |
+| 3        | `min(h_a, h_b)`           | 1/4       |
+| 4        | `min(h_a, h_b)`           | 1/6       |
 
 ---
 
@@ -233,7 +246,7 @@ python Solvers/solve_kpfs_instance_gurobi.py path/to/instance.txt
 python Solvers/solve_all_instances_gurobi.py
 ```
 
-Walks `instances/overlap/` and writes `results/results_overlap_gurobi.csv` with columns: `scenario`, `p_overlap`, `corr_type`, `instance_file`, `n`, `obj_value`, `runtime`.
+Walks `instances/overlap/` and writes `results/results_overlap_gurobi.csv` with columns: `scenario`, `p_overlap`, `corr_type`, `instance_file`, `n`, `obj_value`, `total_violations`, `runtime`.
 
 ---
 
@@ -252,7 +265,7 @@ Writes `results/results_overlap_dp.csv` with columns:
 | Column          | Content                                               |
 |-----------------|-------------------------------------------------------|
 | `scenario`      | Scenario number                                       |
-| `p_overlap`     | Overlap probability folder (e.g. `p_20`)             |
+| `p_overlap`     | Overlap probability folder (e.g. `p_20`)              |
 | `corr_type`     | Correlation type                                      |
 | `instance_file` | Filename                                              |
 | `n`             | Number of items                                       |

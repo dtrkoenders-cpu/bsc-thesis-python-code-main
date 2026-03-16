@@ -114,9 +114,11 @@ def solve_kpfs(instance_path):
     m.optimize()
     runtime = time.time() - t0
 
+    total_vio = round(sum(v[i].X for i in range(nS))) if m.SolCount > 0 else None
     return {
-        'obj_value': m.ObjVal if m.SolCount > 0 else None,
-        'runtime':   runtime,
+        'obj_value':        m.ObjVal if m.SolCount > 0 else None,
+        'total_violations': total_vio,
+        'runtime':          runtime,
     }
 
 

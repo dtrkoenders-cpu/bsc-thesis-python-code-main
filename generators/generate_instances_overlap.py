@@ -68,7 +68,7 @@ def main():
     n_values    = [300, 500, 700, 800, 1000]
     corr_types  = ["not-correlated", "correlated", "fully-correlated"]
     n_instances = 10
-    p_overlaps  = [0.2, 0.4, 0.6]
+    p_overlaps  = [0.2]
     base_dir    = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "instances", "overlap")
 
     for scenario in scenarios:

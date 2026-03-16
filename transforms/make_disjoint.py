@@ -6,8 +6,35 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "generators"))
 from generate_instances_overlap import read_instance, write_instance  # type: ignore
 
+# Fraction of k to keep per scenario after disjointification.
+# Change these values to adjust the violation budget scaling.
+K_SCALE = {
+    1: 1 / 2,
+    2: 1 / 2,
+    3: 1 / 10,
+    4: 1 / 12,
+}
 
-def make_disjoint(n, l, b, k, profits, weights, forfeit_sets):
+# Allowance h for the merged sets created during disjointification.
+# "size-1" → |S_ab| - 1;  "size" → |S_ab|;  None → min(h_a, h_b);  int → fixed value.
+MERGED_H = {
+    1: None,
+    2: None,
+    3: None,
+    4: None,
+}
+
+# Forfeit cost d for the merged sets created during disjointification.
+# "sum" → d_a + d_b;  "max" → max(d_a, d_b);  "min" → min(d_a, d_b);  int → fixed value.
+MERGED_D = {
+    1: "sum",
+    2: "sum",
+    3: "sum",
+    4: "sum",
+}
+
+
+def make_disjoint(n, l, b, k, profits, weights, forfeit_sets, merged_h=None, merged_d="sum"):
     """
     Transform a KPFS instance into a fully disjoint one.
 
@@ -73,7 +100,25 @@ def make_disjoint(n, l, b, k, profits, weights, forfeit_sets):
     for (a, b_idx), shared_items in shared_pairs.items():
         _, h_a, d_a = forfeit_sets[a]
         _, h_b, d_b = forfeit_sets[b_idx]
-        result_sets.append((np.array(sorted(shared_items)), min(h_a, h_b), d_a + d_b))
+        if merged_h == "size-1":
+            h_merged = len(shared_items) - 1
+        elif merged_h == "size":
+            h_merged = len(shared_items)
+        elif merged_h is None:
+            h_merged = min(h_a, h_b)
+        else:
+            h_merged = merged_h
+
+        if merged_d == "sum":
+            d_merged = d_a + d_b
+        elif merged_d == "max":
+            d_merged = max(d_a, d_b)
+        elif merged_d == "min":
+            d_merged = min(d_a, d_b)
+        else:
+            d_merged = merged_d
+
+        result_sets.append((np.array(sorted(shared_items)), h_merged, d_merged))
 
     # --- 6. Validate ---
     _validate_disjoint(result_sets)
@@ -122,10 +167,12 @@ def main():
                     in_path  = os.path.join(corr_dir, fname)
                     out_path = os.path.join(out_subdir, fname)
 
-                    n, l, b, k, profits, weights, forfeit_sets     = read_instance(in_path)
-                    n, l_new, b, k, profits, weights, forfeit_sets = make_disjoint(n, l, b, k, profits, weights, forfeit_sets)
-                    differences.append(l_new-l)
-                    write_instance(out_path, n, b, weights, profits, forfeit_sets, k)
+                    scen_num = int(scenario.split()[-1])
+                    n, l, b, k, profits, weights, forfeit_sets      = read_instance(in_path)
+                    n, l_new, b, k, profits, weights, forfeit_sets  = make_disjoint(n, l, b, k, profits, weights, forfeit_sets, merged_h=MERGED_H[scen_num], merged_d=MERGED_D[scen_num])
+                    differences.append(l_new - l)
+                    k_scaled = int(np.floor(k * K_SCALE[scen_num]))
+                    write_instance(out_path, n, b, weights, profits, forfeit_sets, k_scaled)
                     print(f"Written: {out_path}")
     total = 0
     for dif in differences:
