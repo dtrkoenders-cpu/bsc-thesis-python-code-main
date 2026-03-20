@@ -31,7 +31,7 @@ def read_instance(path):
 # Step 1 — A_i(W, s) for a single forfeit set
 # ---------------------------------------------------------------------------
 
-def compute_A(item_profits, item_weights, capacity, set_size, track_choices=False):
+def compute_A(item_profits, item_weights, capacity, set_size, heur_A, track_choices=False, ):
     """
     A[W, s] = max total profit from selecting exactly s items with total
     weight exactly W. Shape: (capacity+1, set_size+1).
@@ -48,16 +48,37 @@ def compute_A(item_profits, item_weights, capacity, set_size, track_choices=Fals
     if track_choices:
         choice = np.zeros((n_items, capacity + 1, set_size + 1), dtype=bool)
 
-    for t, (p, w) in enumerate(zip(item_profits, item_weights)):
-        if w > capacity:
-            continue
-        candidate = A[:capacity + 1 - w, :-1] + p
-        if track_choices:
-            mask = candidate > A[w:, 1:]
-            choice[t, w:, 1:] = mask
-            A[w:, 1:] = np.where(mask, candidate, A[w:, 1:])
-        else:
-            A[w:, 1:] = np.maximum(A[w:, 1:], candidate)
+    if heur_A:
+        # Greedy heuristic: rank items by profit/weight ratio (desc).
+        # For each count s, record the cumulative (weight, profit) of the
+        # top-s items. Zero-weight items are treated as infinite ratio.
+        with np.errstate(divide='ignore', invalid='ignore'):
+            ratios = np.where(item_weights > 0,
+                              item_profits / item_weights, np.inf)
+        order = np.argsort(-ratios, kind='stable')
+
+        cumW = 0
+        cumP = 0.0
+        for s in range(1, n_items + 1):
+            t = order[s - 1]
+            cumW += int(item_weights[t])
+            cumP += float(item_profits[t])
+            if cumW > capacity:
+                break           # all larger s are also infeasible
+            A[cumW, s] = cumP
+            if track_choices:
+                choice[t, cumW, s] = True
+    else:
+        for t, (p, w) in enumerate(zip(item_profits, item_weights)):
+            if w > capacity:
+                continue
+            candidate = A[:capacity + 1 - w, :-1] + p
+            if track_choices:
+                mask = candidate > A[w:, 1:]
+                choice[t, w:, 1:] = mask
+                A[w:, 1:] = np.where(mask, candidate, A[w:, 1:])
+            else:
+                A[w:, 1:] = np.maximum(A[w:, 1:], candidate)
 
     if track_choices:
         return A, choice
@@ -85,7 +106,7 @@ def backtrack_set(choice, item_indices, item_weights, W, s):
 # Solver
 # ---------------------------------------------------------------------------
 
-def solve_kpdfs(instance_path, return_items=False):
+def solve_kpdfs(instance_path, return_items=False, heur_A = False):
     """
     Solve the KPDFS via DP.
 
@@ -152,12 +173,12 @@ def solve_kpdfs(instance_path, return_items=False):
         n_items = len(items)
 
         if return_items:
-            A, choice_A = compute_A(profits[items], weights[items], b, n_items, track_choices=True)
+            A, choice_A = compute_A(profits[items], weights[items], b, n_items, heur_A, track_choices=True, )
             A_choices.append(choice_A)
             W_ch = np.full((b + 1, k + 1), -1, dtype=int)
             s_ch = np.full((b + 1, k + 1), -1, dtype=int)
         else:
-            A = compute_A(profits[items], weights[items], b, n_items)
+            A = compute_A(profits[items], weights[items], b, n_items, heur_A)
 
         s_arr = np.arange(n_items + 1)
         vio   = np.maximum(0, s_arr - h)

@@ -18,8 +18,8 @@ K_SCALE = {
 # Allowance h for the merged sets created during disjointification.
 # "size-1" → |S_ab| - 1;  "size" → |S_ab|;  None → min(h_a, h_b);  int → fixed value.
 MERGED_H = {
-    1: None,
-    2: None,
+    1: 0,
+    2: 0,
     3: None,
     4: None,
 }

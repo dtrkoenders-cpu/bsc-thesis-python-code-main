@@ -95,7 +95,7 @@ def main():
             print(f"[{i}/{total}] {scenario}/{p_folder}/{corr_type}/{filename}")
 
             # --- DP on disjoint instance ---
-            result_dp = solve_kpdfs(disjoint_path, return_items=True)
+            result_dp = solve_kpdfs(disjoint_path, return_items=True, heur_A=True)
 
             _, l_overlap,  _, k, profits, _, forfeit_sets = read_instance(overlap_path)
             _, l_disjoint, _, _, _,       _, _            = read_instance(disjoint_path)
