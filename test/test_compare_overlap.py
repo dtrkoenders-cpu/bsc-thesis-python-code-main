@@ -16,15 +16,16 @@ from generate_instances_overlap import read_instance     # type: ignore
 # ---------------------------------------------------------------------------
 N_SUBSET      = {300}   # only run on instances with this many items
 MAX_PER_GROUP = 3       # at most this many instances per (scenario/p/corr) group
+HEURIS = "none"  # "none", "greedy", or "dp"
 
 DISJOINT_DIR = os.path.join(_ROOT, "instances", "overlap_disjoint")
 OVERLAP_DIR  = os.path.join(_ROOT, "instances", "overlap")
-RESULTS_FILE = os.path.join(_ROOT, "test", "test_results.csv")
+RESULTS_FILE = os.path.join(_ROOT, "test", "test_results", f"n_{next(iter(N_SUBSET))}", f"test_results{'_heur_A_' + HEURIS if HEURIS != 'none' else ''}.csv")
 
 FIELDNAMES = [
     "scenario", "p_overlap", "corr_type", "instance_file", "n",
-    "k", "violations", "new_sets", 
-    "obj_disjoint", "obj_overlap", "runtime_dp",
+    "k", "violations", "new_sets",
+    "obj_disjoint", "obj_overlap", "runtime_dp", "time_A", "time_bellman",
     "obj_gurobi", "violations_gurobi", "runtime_gurobi",
 ]
 
@@ -95,7 +96,7 @@ def main():
             print(f"[{i}/{total}] {scenario}/{p_folder}/{corr_type}/{filename}")
 
             # --- DP on disjoint instance ---
-            result_dp = solve_kpdfs(disjoint_path, return_items=True, heur_A=True)
+            result_dp = solve_kpdfs(disjoint_path, return_items=True, heur_A=HEURIS)
 
             _, l_overlap,  _, k, profits, _, forfeit_sets = read_instance(overlap_path)
             _, l_disjoint, _, _, _,       _, _            = read_instance(disjoint_path)
@@ -123,6 +124,8 @@ def main():
                 "obj_disjoint":  f"{result_dp['obj_value']:.2f}" if result_dp["obj_value"] is not None else "",
                 "obj_overlap":   f"{obj_overlap:.2f}"            if obj_overlap             is not None else "",
                 "runtime_dp":    f"{result_dp['runtime']:.2f}",
+                "time_A":        f"{result_dp['time_A']:.2f}",
+                "time_bellman":  f"{result_dp['time_bellman']:.2f}",
                 "obj_gurobi":         f"{result_gurobi['obj_value']:.2f}" if result_gurobi["obj_value"] is not None else "",
                 "violations_gurobi":  result_gurobi["total_violations"] if result_gurobi["total_violations"] is not None else "",
                 "runtime_gurobi":     f"{result_gurobi['runtime']:.2f}",
